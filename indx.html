@@ -1,0 +1,424 @@
+<html lang="ar">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام حضور - لوحة المدرس</title>
+    <style>
+        :root {
+            --bg: #fdfdfd;
+            --card: #fff;
+            --accent: #0b5ed7;
+            --muted: #555;
+            --success: #28a745;
+            --danger: #dc3545;
+            --warning: #ffc107;
+        }
+
+        body {
+            font-family: "Tahoma", sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 20px;
+            direction: rtl;
+            color: #111;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            text-align: center;
+        }
+
+        .card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+        }
+
+        input,
+        select,
+        button {
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+
+        button {
+            cursor: pointer
+        }
+
+        button.primary {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+        }
+
+        button.ghost {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid rgba(11, 94, 215, 0.3);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th,
+        td {
+            border: 1px solid #eee;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background: #f3f6f9;
+        }
+
+        .present {
+            background: var(--success);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-block;
+        }
+
+        .absent {
+            background: var(--danger);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-block;
+        }
+
+        .badge {
+            padding: 4px 6px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .warning {
+            background: var(--warning);
+            color: #555;
+        }
+
+        .small {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .actions button {
+            margin: 2px;
+        }
+
+        .popup {
+            position: fixed;
+            inset: 40px;
+            background: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+            overflow: auto;
+            z-index: 9999;
+        }
+
+        .popup h3 {
+            text-align: center;
+            margin-top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>نظام حضور الطلاب</h1>
+
+        <!-- إضافة الطلاب -->
+        <div class="card">
+            <div style="display:flex;gap:10px;">
+                <input id="studentName" placeholder="اسم الطالب">
+                <button id="addStudentBtn" class="primary">إضافة طالب</button>
+            </div>
+        </div>
+
+        <!-- الحضور -->
+        <div class="card">
+            <div style="display:flex;gap:10px;align-items:center;">
+                <input type="date" id="sessionDate">
+                <button id="newSessionBtn" class="primary">فتح جلسة جديدة</button>
+                <button id="exportBtn" class="ghost">تصدير CSV</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>الاسم</th>
+                        <th>حالة اليوم</th>
+                        <th>ملاحظة الغياب السابق</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="studentsTbody"></tbody>
+            </table>
+        </div>
+
+        <!-- الملخص -->
+        <div class="card">
+            <div id="summary" class="small"></div>
+        </div>
+    </div>
+
+    <script>
+
+        const KEY_STUDENTS = 'att_students';
+        const KEY_RECORDS = 'att_records';
+
+        let students = JSON.parse(localStorage.getItem(KEY_STUDENTS) || '[]');
+        let records = JSON.parse(localStorage.getItem(KEY_RECORDS) || '{}');
+
+        const studentNameInput = document.getElementById('studentName');
+        const addStudentBtn = document.getElementById('addStudentBtn');
+        const sessionDateInput = document.getElementById('sessionDate');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const studentsTbody = document.getElementById('studentsTbody');
+        const summaryDiv = document.getElementById('summary');
+        const exportBtn = document.getElementById('exportBtn');
+
+        function saveData() {
+            localStorage.setItem(KEY_STUDENTS, JSON.stringify(students));
+            localStorage.setItem(KEY_RECORDS, JSON.stringify(records));
+        }
+
+        function todayStr(d = new Date()) {
+            return d.toISOString().split('T')[0];
+        }
+        if (!sessionDateInput.value) sessionDateInput.value = todayStr();
+
+        function addStudent() {
+            const name = studentNameInput.value.trim();
+            if (!name) return alert('اكتب اسم الطالب');
+            const id = 's' + Date.now();
+            students.push({ id, name });
+
+            Object.keys(records).forEach(d => {
+                if (!records[d]) records[d] = {};
+                records[d][id] = 'absent';
+            });
+
+            saveData();
+            studentNameInput.value = '';
+            render();
+        }
+
+        function toggleAttendance(id, date) {
+            if (!records[date]) records[date] = {};
+            records[date][id] = records[date][id] === 'present' ? 'absent' : 'present';
+            saveData();
+            render();
+        }
+
+        function findPrevDate(date) {
+            const dates = Object.keys(records).sort((a, b) => new Date(a) - new Date(b));
+            for (let i = dates.length - 1; i >= 0; i--) {
+                if (new Date(dates[i]) < new Date(date)) return dates[i];
+            }
+            return null;
+        }
+
+        function openNewSession(date) {
+            if (!records[date]) records[date] = {};
+            students.forEach(s => {
+                if (!records[date][s.id]) records[date][s.id] = 'absent';
+            });
+            saveData();
+            render();
+        }
+
+        function showHistory(id) {
+            const student = students.find(s => s.id === id);
+            if (!student) return alert('الطالب غير موجود');
+
+            let rows = '';
+            const dates = Object.keys(records).sort((a, b) => new Date(a) - new Date(b));
+
+            dates.forEach(d => {
+                if (records[d][id] !== undefined) {
+                    const state = records[d][id];
+                    rows += `<tr><td>${d}</td><td>${state === 'present' ? 'حاضر' : 'غائب'}</td></tr>`;
+                }
+            });
+
+            const popup = document.createElement('div');
+            popup.className = 'popup';
+            popup.innerHTML = `
+                <h3>سجل الطالب: ${student.name}</h3>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr><th>التاريخ</th><th>الحالة</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <div style="text-align:center;margin-top:10px;">
+                    <button onclick="this.closest('.popup').remove()">إغلاق</button>
+                </div>
+            `;
+            document.body.appendChild(popup);
+        }
+
+        /* ---------------------------
+            🔥 دالة حذف الطالب بالكامل
+           --------------------------- */
+
+        function deleteStudent(id) {
+            if (!confirm("هل تريد حذف الطالب وجميع سجلاته نهائيًا؟")) return;
+
+            students = students.filter(s => s.id !== id);
+
+            Object.keys(records).forEach(date => {
+                if (records[date][id] !== undefined) {
+                    delete records[date][id];
+                }
+            });
+
+            saveData();
+            render();
+            function showHistory(id) {
+
+
+    const student = students.find(s => s.id === id);
+
+    if (!student) return alert("الطالب غير موجود");
+
+
+    let rows = "";
+    const dates = Object.keys(records).sort((a, b) => new Date(a) - new Date(b));
+
+    dates.forEach(d => {
+        const state = records[d][id];
+        if (state !== undefined) {
+            rows += `
+                <tr>
+                    <td>${d}</td>
+                    <td>${state === "present" ? "حاضر" : "غائب"}</td>
+                </tr>
+            `;
+        }
+    });
+
+    const popup = document.createElement("div");
+    popup.className = "popup";
+
+    popup.innerHTML = `
+        <h3>سجل الطالب: ${student.name}</h3>
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th>التاريخ</th>
+                    <th>الحالة</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div style="text-align:center;margin-top:10px;">
+            <button onclick="this.closest('.popup').remove()">إغلاق</button>
+        </div>
+    `;
+
+    document.body.appendChild(popup);
+}
+function showHistory(id) {
+    const student = students.find(s => s.id === id);
+    if (!student) return alert("الطالب غير موجود");
+
+    let rows = "";
+    const dates = Object.keys(records).sort((a, b) => new Date(a) - new Date(b));
+
+    dates.forEach(d => {
+        const state = records[d][id];
+        if (state !== undefined) {
+            rows += `
+                <tr>
+                    <td>${d}</td>
+                    <td>${state === "present" ? "حاضر" : "غائب"}</td>
+                </tr>
+            `;
+        }
+    });
+
+    const popup = document.createElement("div");
+    popup.className = "popup";
+
+}
+        }
+
+        function render() {
+            studentsTbody.innerHTML = '';
+            const date = sessionDateInput.value;
+            const prevDate = findPrevDate(date);
+
+            let presentCount = 0, absentCount = 0;
+
+            students.forEach(s => {
+                if (!records[date]) records[date] = {};
+                if (!records[date][s.id]) records[date][s.id] = 'absent';
+
+                const state = records[date][s.id];
+                if (state === 'present') presentCount++; else absentCount++;
+
+                let note = '-';
+                if (prevDate && records[prevDate][s.id] === 'absent') {
+                    note = `غاب في (${prevDate})`;
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${s.name}</td>
+                    <td><span class="${state === 'present' ? 'present' : 'absent'}">${state === 'present' ? 'حاضر' : 'غائب'}</span></td>
+                    <td><span class="badge ${note.includes('غاب') ? 'warning' : ''}">${note}</span></td>
+                    <td class="actions">
+                        <button onclick="toggleAttendance('${s.id}','${date}')">${state === 'present' ? 'اجعل غائب' : 'اجعل حاضر'}</button>
+                        <button onclick="showHistory('${s.id}')">سجل الطالب</button>
+                        <button style="color:red" onclick="deleteStudent('${s.id}')">حذف</button>
+                    </td>
+                `;
+                studentsTbody.appendChild(tr);
+            });
+
+            summaryDiv.innerHTML = `إجمالي: ${students.length} — حاضر: ${presentCount} — غائب: ${absentCount}`;
+        }
+
+        function exportCSV() {
+            let csv = 'الاسم,التاريخ,الحالة\n';
+            students.forEach(s => {
+                Object.keys(records).sort((a, b) => new Date(a) - new Date(b)).forEach(d => {
+                    const state = records[d][s.id] || 'absent';
+                    csv += `${s.name},${d},${state === 'present' ? 'حاضر' : 'غائب'}\n`;
+                });
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'attendance.csv';
+            a.click();
+        }
+
+        addStudentBtn.onclick = addStudent;
+        newSessionBtn.onclick = () => openNewSession(sessionDateInput.value);
+        exportBtn.onclick = exportCSV;
+
+        if (!records[sessionDateInput.value]) openNewSession(sessionDateInput.value);
+        render();
+
+    </script>
+
+</body>
+
+</html>
